@@ -221,7 +221,10 @@ export default function CheckNamePage() {
 
                 <div className="flex gap-4">
                     <a 
-                        href={`${getApiUrl()}/export/attendance`} 
+                        href={`${getApiUrl()}/export/attendance${(() => {
+                            const sid = subjects.find(s => s.code === selectedSubject)?.id;
+                            return sid ? `?subject_id=${sid}` : "";
+                        })()}`}
                         target="_blank"
                         className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-bold flex items-center gap-2"
                     >
