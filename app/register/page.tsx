@@ -32,7 +32,7 @@ export default function RegisterPage() {
     useEffect(() => {
         // Fix: Use optional chaining to strictly check runtime availability
         // Browsers on HTTP (non-localhost) will leave mediaDevices undefined or strip getUserMedia
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
             setCanUseCamera(true);
         } else {
             console.log("Camera API unavailable (likely insecure HTTP)");

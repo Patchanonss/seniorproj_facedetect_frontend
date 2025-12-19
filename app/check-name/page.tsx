@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import LiveFeed from "../components/dashboard/LiveFeed"; // Reuse existing
 import AttendanceLog from "../components/dashboard/AttendanceLog"; // Reuse existing
 import { getApiUrl } from "@/utils/api.config";
+import ProtectedRoute from "../components/ProtectedRoute";
 
 interface Subject {
   id: number;
@@ -24,9 +26,11 @@ export default function CheckNamePage() {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [sessionTopic, setSessionTopic] = useState("");
   const [room, setRoom] = useState("");
+  const [recentSessions, setRecentSessions] = useState<any[]>([]); // New State
   
   // Session State
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [activeSessionUuid, setActiveSessionUuid] = useState<string | null>(null); // New State
   const [logs, setLogs] = useState([]);
   
   // Load Subjects on Mount
@@ -43,8 +47,46 @@ export default function CheckNamePage() {
             }
         } catch(e) {}
     };
+
+    // Check Active Session
+    const checkActive = async () => {
+        try {
+            const res = await fetch(`${getApiUrl()}/attendance/live`);
+            const data = await res.json();
+            if (data.status === "active") {
+                // RESTORE STATE
+                setActiveSessionId(data.session_id);
+                setActiveSessionUuid(data.session_uuid);
+                setSessionTopic(data.topic);
+                setRoom(data.room);
+                setSelectedSubject(data.subject_code);
+                setLogs(data.logs);
+                setStep("ACTIVE");
+            }
+        } catch (e) {
+            console.error("Failed to check active session", e);
+        }
+    };
+
     fetchSubjects();
+    checkActive();
   }, []);
+
+  // Fetch Recent Sessions when Subject Changes
+  useEffect(() => {
+     if (!selectedSubject) {
+         setRecentSessions([]);
+         return;
+     }
+     
+     const subj = subjects.find(s => s.code === selectedSubject);
+     if (subj) {
+         fetch(`${getApiUrl()}/api/sessions/recent?subject_id=${subj.id}`)
+            .then(res => res.json())
+            .then(data => setRecentSessions(data.slice(0, 5))) // Limit to 5
+            .catch(err => console.error(err));
+     }
+  }, [selectedSubject, subjects]);
 
   const handleStartClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +110,7 @@ export default function CheckNamePage() {
       if (!res.ok) throw new Error(data.detail);
       
       setActiveSessionId(data.session_id);
+      setActiveSessionUuid(data.session_uuid);
       setStep("ACTIVE");
     } catch (err) {
       alert("Failed to start class: " + err);
@@ -130,159 +173,212 @@ export default function CheckNamePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      {step === "SETUP" ? (
-         // ... existing setup form ...
-         <div className="max-w-2xl mx-auto bg-gray-800 p-8 rounded-xl shadow-2xl mt-10">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-3xl font-bold text-blue-400">Start Attendance Check</h1>
-            <button
-               onClick={() => router.push("/dashboard")}
-               className="text-gray-400 hover:text-white transition-colors flex items-center gap-2"
-            >
-              <span>←</span> Back to Dashboard
-            </button>
-          </div>
-          
-          <form onSubmit={handleStartClass} className="space-y-6">
-            <div>
-              <label className="block text-gray-400 mb-2">Select Class</label>
-              <select 
-                className="w-full bg-gray-700 p-3 rounded text-white border border-gray-600"
-                value={selectedSubject}
-                onChange={e => setSelectedSubject(e.target.value)}
-                required
-              >
-                <option value="">-- Choose Subject --</option>
-                {subjects.map(s => (
-                  <option key={s.id} value={s.code}>{s.code} - {s.name}</option>
-                ))}
-              </select>
-            </div>
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-950 text-white font-sans p-6 md:p-12">
+        {step === "SETUP" ? (
+           <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-start mt-10">
             
-            <div className="grid grid-cols-2 gap-4">
+            {/* LEFT: FORM */}
+            <div className="bg-gray-900 border border-gray-800 p-8 rounded-2xl shadow-2xl">
+              <div className="mb-8">
+                  <Link href="/dashboard" className="text-gray-500 hover:text-white mb-4 block">← Back</Link>
+                  <h1 className="text-3xl font-bold text-white mb-2">New Session</h1>
+                  <p className="text-gray-400">Configure attendance settings for this class.</p>
+              </div>
+              
+              <form onSubmit={handleStartClass} className="space-y-6">
                 <div>
-                  <label className="block text-gray-400 mb-2">Session Name</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-gray-700 p-3 rounded text-white border border-gray-600"
-                    placeholder="e.g. Week 1 Lecture"
-                    value={sessionTopic}
-                    onChange={e => setSessionTopic(e.target.value)}
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Class / Subject</label>
+                  <select 
+                    className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-blue-500 outline-none transition"
+                    value={selectedSubject}
+                    onChange={e => setSelectedSubject(e.target.value)}
                     required
-                  />
+                  >
+                    <option value="">-- Choose Subject --</option>
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.code}>{s.code} - {s.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div>
-                  <label className="block text-gray-400 mb-2">Room Number</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-gray-700 p-3 rounded text-white border border-gray-600"
-                    placeholder="e.g. 404"
-                    value={room}
-                    onChange={e => setRoom(e.target.value)}
-                    required
-                  />
-                </div>
-            </div>
-            
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded font-bold text-lg">
-              Start Class
-            </button>
-            
-          </form>
-        </div>
-      ) : (
-        <div className="h-full flex flex-col">
-            <header className="flex justify-between items-center mb-6 bg-gray-800 p-4 rounded-lg">
-                <div className="flex items-center gap-6">
+                
+                <div className="space-y-4">
                     <div>
-                        <h2 className="text-xl font-bold text-blue-400">{selectedSubject}: {sessionTopic}</h2>
-                        <p className="text-gray-400">Room: {room}</p>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Session Topic</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-blue-500 outline-none transition"
+                        placeholder="e.g. Lab 01: Python Basics"
+                        value={sessionTopic}
+                        onChange={e => setSessionTopic(e.target.value)}
+                        required
+                      />
                     </div>
-                    
-                    {/* REMOTE TOGGLES */}
-                    <div className="flex items-center gap-4 bg-gray-900 px-4 py-2 rounded-lg border border-gray-700">
-                        <div className="flex flex-col items-center">
-                            <span className="text-[10px] uppercase text-gray-500 font-bold mb-1">Registration</span>
-                            <button 
-                                onClick={toggleRegistration}
-                                className={`w-12 h-6 rounded-full p-1 transition-colors ${isRegOpen ? 'bg-green-500' : 'bg-gray-600'}`}
-                            >
-                                <div className={`h-4 w-4 bg-white rounded-full transition-transform ${isRegOpen ? 'translate-x-6' : 'translate-x-0'}`} />
-                            </button>
-                        </div>
-                        <div className="w-px h-8 bg-gray-700" />
-                        <button onClick={copyLink} className="text-blue-400 hover:text-blue-300 text-sm font-bold flex flex-col items-center">
-                            <span>🔗</span>
-                            <span>Copy Link</span>
-                        </button>
-                    </div>
-                </div>
-
-                <div className="flex gap-4">
-                    <a 
-                        href={`${getApiUrl()}/export/attendance${(() => {
-                            const sid = subjects.find(s => s.code === selectedSubject)?.id;
-                            return sid ? `?subject_id=${sid}` : "";
-                        })()}`}
-                        target="_blank"
-                        className="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-bold flex items-center gap-2"
-                    >
-                        📄 Export CSV
-                    </a>
-                    <button onClick={handleEndClass} className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded font-bold">
-                        End Class
-                    </button>
-                </div>
-            </header>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
-                {/* LIVE FEED */}
-                <div className="lg:col-span-8 bg-black rounded-xl overflow-hidden relative shadow-lg aspect-video flex items-center justify-center">
-                   {/* We reuse the existing LiveFeed logic but simplified for embedding */}
-                    <img 
-                      src={`${getApiUrl()}/video_feed`} 
-                      className="w-full h-full object-cover"
-                      alt="Live Feed"
-                    />
-                    
-                    {/* OVERLAY STATS */}
-                    <div className="absolute top-4 left-4 bg-black/50 px-4 py-2 rounded backdrop-blur">
-                        <span className="text-green-400 font-bold">● Active</span>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Room</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-blue-500 outline-none transition"
+                        placeholder="e.g. 505"
+                        value={room}
+                        onChange={e => setRoom(e.target.value)}
+                        required
+                      />
                     </div>
                 </div>
                 
-                {/* LOGS */}
-                <div className="lg:col-span-4 bg-gray-800 rounded-xl p-4 flex flex-col h-[600px]">
-                    <h3 className="text-lg font-bold mb-4 border-b border-gray-700 pb-2 flex justify-between">
-                        <span>Attendance Log</span>
-                        <span className="text-green-400">{logs.length} / {subjects.find(s=>s.code===selectedSubject)?.student_count || "-"}</span>
-                    </h3>
-                    <div className="flex-1 overflow-y-auto space-y-2">
-                         {logs.map((log: any, i) => (
-                             <div key={i} className="flex justify-between items-center p-3 bg-gray-700/50 rounded hover:bg-gray-700 transition border-l-4 border-green-500">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center font-bold relative overflow-hidden">
-                                        {/* If we have an image, show it? For check name, user asked for "Latest Name Top". */}
-                                        {log.name[0]}
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-white">{log.name}</p>
-                                        <p className="text-xs text-gray-400">{log.student_code}</p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    {/* Removed Status Text as requested */}
-                                    <p className="text-xs text-gray-400 font-mono">{log.check_in_time.split(" ")[1]}</p>
-                                </div>
-                             </div>
-                         ))}
-                         {logs.length === 0 && <p className="text-center text-gray-500 mt-10">Waiting for students...</p>}
-                    </div>
+                <button 
+                  type="submit" 
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-900/20 transition-all transform hover:scale-[1.02]"
+                >
+                  Start / Resume Session
+                </button>
+              </form>
+            </div>
+
+            {/* RIGHT: RECENT SESSIONS (Popup/List Requirement) */}
+            <div className="bg-gray-900/50 border border-gray-800 p-8 rounded-2xl">
+                <h2 className="text-xl font-bold text-white mb-6">Recent Active Sessions</h2>
+                <div className="space-y-4">
+                    
+                    {recentSessions.length > 0 ? (
+                        <div className="flex flex-col gap-2">
+                             {recentSessions.map((sess, i) => (
+                                 <button 
+                                   key={i}
+                                   type="button"
+                                   onClick={() => {
+                                       setSessionTopic(sess.topic);
+                                   }}
+                                   className="text-left p-4 bg-gray-800 hover:bg-gray-700 rounded-xl border border-gray-700 transition flex justify-between items-center group"
+                                 >
+                                     <div>
+                                         <p className="font-bold text-white">{sess.topic}</p>
+                                         <p className="text-xs text-gray-400">{sess.date} • {sess.start_time}</p>
+                                     </div>
+                                     <span className="text-blue-400 opacity-0 group-hover:opacity-100 text-sm">Use →</span>
+                                 </button>
+                             ))}
+                        </div>
+                    ) : (
+                         <div className="p-4 bg-gray-800 rounded-xl border border-gray-700 opacity-60">
+                             <p className="text-sm text-gray-400">
+                                  {selectedSubject 
+                                      ? "No recent sessions found for this class." 
+                                      : "Select a subject to see recent sessions..."
+                                  }
+                             </p>
+                         </div>
+                    )}
+                     
+                     {/* Hint */}
+                     <div className="mt-8 p-4 bg-blue-900/10 border border-blue-900/30 rounded-lg">
+                         <p className="text-sm text-blue-400">
+                             ℹ️ <strong>Auto-Resume:</strong> If you enter the same Session Name for the selected Class, 
+                             the system will automatically resume the existing session.
+                         </p>
+                     </div>
                 </div>
             </div>
-        </div>
-      )}
-    </div>
+            
+          </div>
+        ) : (
+          <div className="h-full flex flex-col max-w-6xl mx-auto mt-6">
+              <header className="flex justify-between items-center mb-8 bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
+                  <div>
+                      <span className="text-xs font-bold text-green-500 uppercase tracking-widest">● Active Session</span>
+                      <h2 className="text-3xl font-bold text-white mt-1">{sessionTopic}</h2>
+                      <p className="text-gray-400">{selectedSubject} • Room {room}</p>
+                  </div>
+                  
+                  <div className="flex gap-4">
+                       {/* End Class */}
+                      <button onClick={handleEndClass} className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-6 py-3 rounded-xl font-bold transition-colors">
+                          End Session
+                      </button>
+                  </div>
+              </header>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* CONTROLS CARD */}
+                  <div className="bg-gray-900 p-8 rounded-2xl border border-gray-800 space-y-6">
+                      <h3 className="text-xl font-bold text-white border-b border-gray-800 pb-4">Session Controls</h3>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                           {/* VIEW MONITOR */}
+                           <Link 
+                              href="/monitor" 
+                              target="_blank"
+                              className="bg-purple-600 hover:bg-purple-500 text-white p-4 rounded-xl font-bold text-center transition shadow-lg shadow-purple-900/20 block"
+                           >
+                               🖥️ Open Monitor
+                           </Link>
+                           
+                           {/* LIVE VIEW PROJECTOR */}
+                           {activeSessionUuid ? (
+                               <a 
+                                  href={`/live-view/${activeSessionUuid}`} 
+                                  target="_blank"
+                                  className="bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-xl font-bold text-center transition shadow-lg shadow-indigo-900/20 block"
+                               >
+                                   📽️ Projector View
+                               </a>
+                           ) : (
+                               <button disabled className="bg-gray-700 text-gray-500 p-4 rounded-xl font-bold cursor-not-allowed">
+                                   📽️ Projector View (Loading...)
+                               </button>
+                           )}
+                      </div>
+
+                      <div className="p-4 bg-gray-800 rounded-xl border border-gray-700">
+                          <div className="flex justify-between items-center mb-2">
+                               <span className="font-bold text-gray-300">Registration Mode</span>
+                               <div className={`w-3 h-3 rounded-full ${isRegOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                          </div>
+                          <button 
+                             onClick={toggleRegistration}
+                             className={`w-full py-2 rounded-lg font-bold border ${isRegOpen ? 'bg-green-900/20 text-green-400 border-green-900' : 'bg-gray-700 text-gray-400 border-gray-600'}`}
+                          >
+                              {isRegOpen ? "OPEN (Accepting Faces)" : "LOCKED"}
+                          </button>
+                      </div>
+
+                      <button onClick={copyLink} className="w-full py-4 text-blue-400 border border-blue-900/30 hover:bg-blue-900/10 rounded-xl font-bold transition">
+                          🔗 Copy Register Link
+                      </button>
+                  </div>
+
+                  {/* MINI LOG PREVIEW */}
+                  <div className="bg-gray-900 p-8 rounded-2xl border border-gray-800 flex flex-col h-[500px]">
+                       <div className="flex justify-between items-center mb-6">
+                          <h3 className="text-xl font-bold text-white">Live Log</h3>
+                          <span className="text-green-500 font-mono bg-green-900/20 px-2 py-1 rounded text-xs">{logs.length} Checked In</span>
+                       </div>
+                       
+                       <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                           {logs.map((log: any, i) => (
+                               <div key={i} className="flex justify-between items-center p-3 bg-gray-800 rounded-lg border border-gray-700">
+                                  <div className="flex items-center gap-3">
+                                     {/* Registered Photo Avatar */}
+                                     <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-600 bg-gray-700">
+                                         <img 
+                                            src={`${getApiUrl()}/${log.image_path}`} 
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => (e.target as HTMLImageElement).src="https://ui-avatars.com/api/?name="+log.name}
+                                         />
+                                     </div>
+                                      <span className="font-bold text-white">{log.name}</span>
+                                  </div>
+                                  <span className="font-mono text-gray-400 text-sm">{log.check_in_time.split(" ")[1]}</span>
+                               </div>
+                           ))}
+                           {logs.length === 0 && <div className="text-center text-gray-600 py-10">Waiting for students...</div>}
+                       </div>
+                  </div>
+              </div>
+          </div>
+        )}
+      </div>
+    </ProtectedRoute>
   );
 }
