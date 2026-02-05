@@ -5,6 +5,15 @@ interface AttendanceLogProps {
 }
 
 export default function AttendanceLog({ logs }: AttendanceLogProps) {
+  const formatTimestamp = (ts: string) => {
+      if (!ts) return "";
+      try {
+          const [datePart, timePart] = ts.split(" ");
+          const [y, m, d] = datePart.split("-");
+          return `${d}/${m}/${y} ${timePart}`;
+      } catch (e) { return ts; }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 flex flex-col overflow-hidden max-h-[80vh]">
       <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
@@ -37,7 +46,7 @@ export default function AttendanceLog({ logs }: AttendanceLogProps) {
               logs.map((log, i) => (
                 <tr key={i} className="hover:bg-blue-50 transition-colors">
                   <td className="p-3 text-xs font-mono text-slate-500">
-                    {log.check_in_time}
+                    {formatTimestamp(log.check_in_time)}
                   </td>
                   <td className="p-3 text-sm font-medium text-slate-800">
                     {log.name}

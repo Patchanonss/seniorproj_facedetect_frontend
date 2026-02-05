@@ -4,52 +4,90 @@ import { useState, useEffect } from "react";
 import { getApiUrl } from "@/utils/api.config";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react"; // Check if installed, if not fallback to simple display or install
+import { getToken } from "@/utils/auth";
 import ProtectedRoute from "../components/ProtectedRoute";
 
 export default function RemoteLinkPage() {
     const [subjects, setSubjects] = useState<any[]>([]);
     const [selectedSubject, setSelectedSubject] = useState("");
-    const [isRegOpen, setIsRegOpen] = useState(false);
+    // isRegOpen now derived from subject logic, but we keep state for local optimistic update
+    // Actually, we should find the subject object.
+    const activeSubject = subjects.find(s => s.code === selectedSubject);
+    const isRegOpen = activeSubject ? activeSubject.is_registration_open : false;
+
     const [baseUrl, setBaseUrl] = useState("");
+    
+    // 0. Auto-Select from URL
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("subject_code");
+        if (code) setSelectedSubject(code);
+    }, []);
 
     useEffect(() => {
         // 1. Fetch Subjects
-        const fetchSubjects = async () => {
-             try {
-                const token = document.cookie.split("access_token=")[1]?.split(";")[0];
-                const res = await fetch(`${getApiUrl()}/subjects`, {
-                    headers: { "Authorization": `Bearer ${token}` }
-                });
+            const fetchSubjects = async () => {
+                 try {
+                    const token = getToken();
+                    const res = await fetch(`${getApiUrl()}/subjects`, {
+                        headers: { "Authorization": `Bearer ${token}` }
+                    });
                 if (res.ok) setSubjects(await res.json());
             } catch(e) {}
         };
         fetchSubjects();
 
-        // 2. Fetch Status
-        const fetchStatus = async () => {
-            try {
-                const res = await fetch(`${getApiUrl()}/session/registration_status`);
-                const data = await res.json();
-                setIsRegOpen(data.enabled);
-            } catch(e) {}
-        };
-        fetchStatus();
+        // 2. Fetch Status (Removed global fetch, relying on subjects list)
+        // We might want to refresh subjects strictly?
+        // Let's keep fetchSubjects as the source of truth.
         
-        // 3. Set Base URL
-        setBaseUrl(window.location.origin);
+        // 3. Dynamic IP Detection (Auto-detect LAN IP)
+        const fetchSystemIP = async () => {
+             // If we are already on a public/LAN network (not localhost), use current origin
+             if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+                 setBaseUrl(window.location.origin);
+                 return;
+             }
+             
+             try {
+                // Ask Backend for the Machine's LAN IP
+                const res = await fetch(`${getApiUrl()}/system/ip`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ip) {
+                        setBaseUrl(`http://${data.ip}:3000`); // Assume Frontend is always on port 3000
+                        return;
+                    }
+                }
+             } catch (e) {
+                 console.error("Failed to fetch system IP", e);
+             }
+             
+             // Fallback if backend is unreachable
+             setBaseUrl(window.location.origin);
+        };
+        fetchSystemIP();
     }, []);
 
     const toggleRegistration = async (enable: boolean) => {
+        if (!activeSubject) return;
         try {
-            await fetch(`${getApiUrl()}/session/toggle_registration?enable=${enable}`, { method: "POST" });
-            setIsRegOpen(enable);
+            const token = getToken();
+            await fetch(`${getApiUrl()}/session/toggle_registration?enable=${enable}&subject_id=${activeSubject.id}`, { 
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            // Optimistic Update
+            setSubjects(prev => prev.map(s => 
+                s.id === activeSubject.id ? { ...s, is_registration_open: enable } : s
+            ));
         } catch(e) { alert("Error toggling"); }
     };
     
     const getLink = () => {
         if (!selectedSubject) return "";
-        const sid = subjects.find(s => s.code === selectedSubject)?.id;
-        return `${baseUrl}/register?class_id=${sid}`;
+        // Use code directly as it is selectedSubject value
+        return `${baseUrl}/register?class_code=${selectedSubject}`;
     };
 
     return (

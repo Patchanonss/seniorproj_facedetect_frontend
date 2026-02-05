@@ -7,7 +7,7 @@ import { getApiUrl } from "@/utils/api.config";
 export default function RegisterPage() {
     const [name, setName] = useState("");
     const [studentCode, setStudentCode] = useState("");
-    const [classId, setClassId] = useState("");
+    const [classCode, setClassCode] = useState("");
     const [file, setFile] = useState<File | null>(null);
     const [status, setStatus] = useState("IDLE"); // IDLE, UPLOADING, SUCCESS, ERROR
     const [message, setMessage] = useState("");
@@ -17,13 +17,35 @@ export default function RegisterPage() {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [stream, setStream] = useState<MediaStream | null>(null);
+ 
+     // Load class_code from URL
+     const [isLocked, setIsLocked] = useState(false);
+     useEffect(() => {
+         const params = new URLSearchParams(window.location.search);
+         const cc = params.get("class_code");
+         if (cc) {
+             setClassCode(cc);
+             setIsLocked(true);
+         }
+         
+         // RESTORE STATE from LocalStorage
+         const saved = localStorage.getItem("reg_draft");
+         if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                if (parsed.name) setName(parsed.name);
+                if (parsed.studentCode) setStudentCode(parsed.studentCode);
+                // Only restore classCode if NOT locked by URL
+                if (!cc && parsed.classCode) setClassCode(parsed.classCode);
+            } catch (e) { console.error("Failed to restore draft", e); }
+         }
+     }, []);
 
-    // Load class_id from URL
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const cid = params.get("class_id");
-        if (cid) setClassId(cid);
-    }, []);
+     // SAVE STATE to LocalStorage
+     useEffect(() => {
+         const draft = { name, studentCode, classCode };
+         localStorage.setItem("reg_draft", JSON.stringify(draft));
+     }, [name, studentCode, classCode]);
     
     // Camera Logic
     const [canUseCamera, setCanUseCamera] = useState(false);
@@ -90,6 +112,7 @@ export default function RegisterPage() {
             // 1. Validate Phase
             const formData = new FormData();
             formData.append("file", file);
+            formData.append("class_code", classCode); // NEW: Send Class Code for Validation
             
             const res = await fetch(`${getApiUrl()}/register/validate`, {
                 method: "POST",
@@ -107,7 +130,7 @@ export default function RegisterPage() {
                     token: data.token,
                     name: name,
                     student_code: studentCode,
-                    class_id: parseInt(classId)
+                    class_code: classCode
                 })
             });
             const confirmData = await confirmRes.json();
@@ -115,6 +138,7 @@ export default function RegisterPage() {
              
              setStatus("SUCCESS");
              setMessage("Registration Successful!");
+             localStorage.removeItem("reg_draft"); // Clear Draft
              
         } catch (err: any) {
             setStatus("ERROR");
@@ -160,12 +184,14 @@ export default function RegisterPage() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold mb-1">Class ID (Ask Professor)</label>
+                            <label className="block text-sm font-bold mb-1">Class Code (Ask Professor)</label>
                             <input 
-                                type="number" 
-                                className="w-full p-3 border rounded" 
-                                value={classId} onChange={e => setClassId(e.target.value)}
-                                placeholder="e.g. 1"
+                                type="text" 
+                                className={`w-full p-3 border rounded ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                value={classCode} 
+                                onChange={e => !isLocked && setClassCode(e.target.value)}
+                                placeholder="e.g. 01209199"
+                                readOnly={isLocked}
                                 required
                             />
                         </div>

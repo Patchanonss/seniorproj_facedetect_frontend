@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { getApiUrl } from "@/utils/api.config";
 import Link from "next/link";
+import { getToken } from "@/utils/auth";
 import { useRouter } from "next/navigation";
 import ProtectedRoute from "../components/ProtectedRoute";
 
@@ -41,11 +42,19 @@ export default function MonitorPage() {
   useEffect(() => {
     const fetchMonitorData = async () => {
         try {
-            const liveRes = await fetch(`${getApiUrl()}/attendance/live`);
+            const token = getToken();
+            // 1. Check for Active Session
+            const liveRes = await fetch(`${getApiUrl()}/attendance/live`, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             const liveData = await liveRes.json();
             
             if (liveData.status === "active" && liveData.session_id) {
-                const listRes = await fetch(`${getApiUrl()}/session/monitor?session_id=${liveData.session_id}`);
+                // 2. Fetch Monitor Data
+                const listRes = await fetch(`${getApiUrl()}/session/monitor?session_id=${liveData.session_id}`, {
+                    headers: { "Authorization": `Bearer ${token}` }
+                });
+                
                 if (listRes.ok) {
                     const listData = await listRes.json();
                     setActiveSession(listData.session_info);
@@ -95,10 +104,49 @@ export default function MonitorPage() {
       return sorted;
   };
 
-  // --- STATS ---
   const total = students.length;
   const present = students.filter(s => s.status !== "ABSENT").length;
   const absent = total - present;
+
+  // --- ACTIONS ---
+  const handleManualUpdate = async (studentName: string, status: "PRESENT" | "ABSENT" | "LATE") => {
+      // 1. Optimistic Update
+      const oldStudents = [...students];
+      setStudents(prev => prev.map(s => {
+          if (s.name === studentName) {
+              return { 
+                  ...s, 
+                  status: status,
+                  check_in_time: status === "ABSENT" ? null : (s.check_in_time || new Date().toISOString().slice(0, 19).replace('T', ' '))
+              }; 
+          }
+          return s;
+      }));
+
+      try {
+          const token = getToken();
+          const res = await fetch(`${getApiUrl()}/attendance/manual`, {
+              method: "POST",
+              headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                  student_name: studentName,
+                  status: status
+              })
+          });
+
+          if (!res.ok) {
+              throw new Error("Failed update");
+          }
+          // Backend will auto-update text file/db, next poll will confirm
+      } catch (e) {
+          console.error("Manual update failed", e);
+          alert("Failed to update status. Reverting.");
+          setStudents(oldStudents); // Revert
+      }
+  };
 
 
   return (
@@ -230,6 +278,38 @@ export default function MonitorPage() {
                                            </h3>
                                        </div>
                                        
+                                       {/* MANUAL OVERRIDE MENU (On Hover/Focus) */}
+                                       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-1 z-20">
+                                            {/* Three Dots / Edit Icon */}
+                                            <div className="group/menu relative">
+                                                <button className="w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 border border-gray-600 flex items-center justify-center text-white">
+                                                    ⋮
+                                                </button>
+                                                
+                                                {/* Dropdown Content */}
+                                                <div className="hidden group-hover/menu:block absolute right-0 top-full mt-1 w-32 bg-gray-900 border border-gray-700 shadow-xl rounded-lg overflow-hidden z-30">
+                                                    <button 
+                                                        onClick={() => handleManualUpdate(student.name, "PRESENT")}
+                                                        className="w-full text-left px-3 py-2 text-xs font-bold text-green-400 hover:bg-gray-800 border-b border-gray-800 flex items-center gap-2"
+                                                    >
+                                                        ✅ Present
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleManualUpdate(student.name, "ABSENT")}
+                                                        className="w-full text-left px-3 py-2 text-xs font-bold text-red-400 hover:bg-gray-800 border-b border-gray-800 flex items-center gap-2"
+                                                    >
+                                                        ❌ Absent
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleManualUpdate(student.name, "LATE")}
+                                                        className="w-full text-left px-3 py-2 text-xs font-bold text-yellow-400 hover:bg-gray-800 flex items-center gap-2"
+                                                    >
+                                                        ⏰ Late
+                                                    </button>
+                                                </div>
+                                            </div>
+                                       </div>
+
                                        {/* BOTTOM STATUS */}
                                        <div>
                                            {isPresent ? (
@@ -238,6 +318,13 @@ export default function MonitorPage() {
                                                       <span className="text-[10px] text-gray-500 uppercase font-bold">Last Seen</span>
                                                       <span className="font-mono text-sm text-green-400">
                                                           {student.check_in_time?.split(" ")[1].slice(0,5)}
+                                                      </span>
+                                                      <span className="font-mono text-[10px] text-gray-400">
+                                                          {(() => {
+                                                              if (!student.check_in_time) return "";
+                                                              const [y, m, d] = student.check_in_time.split(" ")[0].split("-");
+                                                              return `${d}/${m}/${y}`;
+                                                          })()}
                                                       </span>
                                                   </div>
                                                   <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e] animate-pulse"/>
@@ -250,21 +337,6 @@ export default function MonitorPage() {
                                        </div>
                                    </div>
                                </div>
-                               
-                               {/* OVERLAY: VIEW SNAPSHOT */}
-                               {student.proof_path && (
-                                   <div className="absolute inset-0 bg-black/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                                       {/* Just a visual indication that they can see details if we added a modal. 
-                                           For now, just simpler UI as requested. 
-                                           Or we can show the SNAPSHOT on hover?
-                                        */}
-                                   </div>
-                               )}
-                               
-                               {/* Hover Effect: Show Snapshot instead of Registered Image? 
-                                   User said: "Pic separate column... Large...". 
-                                   Let's keep registered image as main because it's cleaner.
-                               */}
                            </div>
                        );
                    })}

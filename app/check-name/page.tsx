@@ -7,6 +7,7 @@ import Link from "next/link";
 import LiveFeed from "../components/dashboard/LiveFeed"; // Reuse existing
 import AttendanceLog from "../components/dashboard/AttendanceLog"; // Reuse existing
 import { getApiUrl } from "@/utils/api.config";
+import { getToken } from "@/utils/auth";
 import ProtectedRoute from "../components/ProtectedRoute";
 
 interface Subject {
@@ -26,6 +27,7 @@ export default function CheckNamePage() {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [sessionTopic, setSessionTopic] = useState("");
   const [room, setRoom] = useState("");
+  const [sessionDate, setSessionDate] = useState(""); // New State
   const [recentSessions, setRecentSessions] = useState<any[]>([]); // New State
   
   // Session State
@@ -51,7 +53,10 @@ export default function CheckNamePage() {
     // Check Active Session
     const checkActive = async () => {
         try {
-            const res = await fetch(`${getApiUrl()}/attendance/live`);
+            const token = getToken();
+            const res = await fetch(`${getApiUrl()}/attendance/live`, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
             const data = await res.json();
             if (data.status === "active") {
                 // RESTORE STATE
@@ -59,8 +64,10 @@ export default function CheckNamePage() {
                 setActiveSessionUuid(data.session_uuid);
                 setSessionTopic(data.topic);
                 setRoom(data.room);
+                setSessionDate(data.date);
                 setSelectedSubject(data.subject_code);
                 setLogs(data.logs);
+                setIsRegOpen(data.registration_enabled);
                 setStep("ACTIVE");
             }
         } catch (e) {
@@ -111,6 +118,9 @@ export default function CheckNamePage() {
       
       setActiveSessionId(data.session_id);
       setActiveSessionUuid(data.session_uuid);
+      // We assume date is today for newly started sessions, or we could fetch detail. 
+      // For simplicity let's set it to local formatted date or wait for poll to update it.
+      setSessionDate(new Date().toISOString().split('T')[0]); 
       setStep("ACTIVE");
     } catch (err) {
       alert("Failed to start class: " + err);
@@ -123,10 +133,14 @@ export default function CheckNamePage() {
     
     const interval = setInterval(async () => {
        try {
-         const res = await fetch(`${getApiUrl()}/attendance/live`);
+         const token = getToken();
+         const res = await fetch(`${getApiUrl()}/attendance/live`, {
+             headers: { "Authorization": `Bearer ${token}` }
+         });
          const data = await res.json();
          if (data.status === "active") {
              setLogs(data.logs);
+             setIsRegOpen(data.registration_enabled);
          }
        } catch (e) {
          console.error(e);
@@ -154,14 +168,18 @@ export default function CheckNamePage() {
   
   const toggleRegistration = async () => {
     try {
+        const token = document.cookie.split("access_token=")[1]?.split(";")[0];
         const newState = !isRegOpen;
-        await fetch(`${getApiUrl()}/session/toggle_registration?enable=${newState}`, { method: "POST" });
+        await fetch(`${getApiUrl()}/session/toggle_registration?enable=${newState}`, { 
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` }
+        });
         setIsRegOpen(newState);
     } catch(e) { alert("Error toggling registration"); }
   };
   
   const copyLink = () => {
-      const url = `http://localhost:3000/register?class_id=${subjects.find(s=>s.code===selectedSubject)?.id}`; // Assuming we had ID map
+      const url = `http://10.31.32.215:3000/register?class_id=${subjects.find(s=>s.code===selectedSubject)?.id}`; // Assuming we had ID map
       // For MVP, if we don't have ID map handy in state, just generic.
       // But we do! subjects has ID.
       // Wait, subjects state is [{id...}].
@@ -170,6 +188,25 @@ export default function CheckNamePage() {
       const fullUrl = `${base}/register?class_id=${sid}`;
       navigator.clipboard.writeText(fullUrl);
       alert("Link copied: " + fullUrl);
+  };
+
+  // Helper to format "YYYY-MM-DD HH:MM:SS" -> "DD/MM/YYYY HH:MM:SS"
+  const formatTimestamp = (ts: string) => {
+      if (!ts) return "";
+      try {
+          const [datePart, timePart] = ts.split(" ");
+          const [y, m, d] = datePart.split("-");
+          return `${d}/${m}/${y} ${timePart}`;
+      } catch (e) { return ts; }
+  };
+
+  // Helper to format YYYY-MM-DD -> DD/MM/YYYY
+  const formatDate = (dateStr: string) => {
+      if (!dateStr) return "";
+       try {
+          const [y, m, d] = dateStr.split("-");
+          return `${d}/${m}/${y}`;
+      } catch (e) { return dateStr; }
   };
 
   return (
@@ -210,7 +247,7 @@ export default function CheckNamePage() {
                         className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-blue-500 outline-none transition"
                         placeholder="e.g. Lab 01: Python Basics"
                         value={sessionTopic}
-                        onChange={e => setSessionTopic(e.target.value)}
+                        onChange={e => setSessionTopic(e.target.value.toLowerCase())}
                         required
                       />
                     </div>
@@ -288,7 +325,7 @@ export default function CheckNamePage() {
                   <div>
                       <span className="text-xs font-bold text-green-500 uppercase tracking-widest">● Active Session</span>
                       <h2 className="text-3xl font-bold text-white mt-1">{sessionTopic}</h2>
-                      <p className="text-gray-400">{selectedSubject} • Room {room}</p>
+                      <p className="text-gray-400">{selectedSubject} • Room {room} • {formatDate(sessionDate)}</p>
                   </div>
                   
                   <div className="flex gap-4">
@@ -330,28 +367,19 @@ export default function CheckNamePage() {
                            )}
                       </div>
 
-                      <div className="p-4 bg-gray-800 rounded-xl border border-gray-700">
-                          <div className="flex justify-between items-center mb-2">
-                               <span className="font-bold text-gray-300">Registration Mode</span>
-                               <div className={`w-3 h-3 rounded-full ${isRegOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                          </div>
-                          <button 
-                             onClick={toggleRegistration}
-                             className={`w-full py-2 rounded-lg font-bold border ${isRegOpen ? 'bg-green-900/20 text-green-400 border-green-900' : 'bg-gray-700 text-gray-400 border-gray-600'}`}
-                          >
-                              {isRegOpen ? "OPEN (Accepting Faces)" : "LOCKED"}
-                          </button>
-                      </div>
-
-                      <button onClick={copyLink} className="w-full py-4 text-blue-400 border border-blue-900/30 hover:bg-blue-900/10 rounded-xl font-bold transition">
-                          🔗 Copy Register Link
-                      </button>
+                       <Link 
+                           href={`/remote-link?subject_code=${selectedSubject}`}
+                           target="_blank"
+                           className="w-full py-4 text-blue-400 border border-blue-900/30 hover:bg-blue-900/10 rounded-xl font-bold transition block text-center"
+                       >
+                           🔗 Open Remote Registration Page
+                       </Link>
                   </div>
 
                   {/* MINI LOG PREVIEW */}
                   <div className="bg-gray-900 p-8 rounded-2xl border border-gray-800 flex flex-col h-[500px]">
                        <div className="flex justify-between items-center mb-6">
-                          <h3 className="text-xl font-bold text-white">Live Log</h3>
+                          <h3 className="text-xl font-bold text-white">Live Log <span className="text-gray-500 text-sm font-normal ml-2">{formatDate(sessionDate)}</span></h3>
                           <span className="text-green-500 font-mono bg-green-900/20 px-2 py-1 rounded text-xs">{logs.length} Checked In</span>
                        </div>
                        
@@ -369,7 +397,7 @@ export default function CheckNamePage() {
                                      </div>
                                       <span className="font-bold text-white">{log.name}</span>
                                   </div>
-                                  <span className="font-mono text-gray-400 text-sm">{log.check_in_time.split(" ")[1]}</span>
+                                  <span className="font-mono text-gray-400 text-sm">{formatTimestamp(log.check_in_time)}</span>
                                </div>
                            ))}
                            {logs.length === 0 && <div className="text-center text-gray-600 py-10">Waiting for students...</div>}

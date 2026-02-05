@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getApiUrl } from "@/utils/api.config";
+import { getToken } from "@/utils/auth";
 import ProtectedRoute from "../components/ProtectedRoute";
 
 export default function ClassesPage() {
@@ -22,10 +23,10 @@ export default function ClassesPage() {
     
     const fetchSubjects = async () => {
         try {
-            // Need token
-            // TODO: Refactor fetch to use a hook or interceptor for Auth
-            const token = document.cookie.split("access_token=")[1]?.split(";")[0];
-            const res = await fetch(`${getApiUrl()}/subjects`, {
+            // Needed for Auth
+            
+            const token = getToken();
+            const res = await fetch(`${getApiUrl()}/subjects?include_disabled=true`, {
                 headers: { "Authorization": `Bearer ${token}` }
             });
             if (res.ok) {
@@ -38,7 +39,7 @@ export default function ClassesPage() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const token = document.cookie.split("access_token=")[1]?.split(";")[0];
+            const token = getToken();
             const res = await fetch(`${getApiUrl()}/subjects`, {
                 method: "POST",
                 headers: { 
@@ -59,6 +60,18 @@ export default function ClassesPage() {
             setIsCreating(false);
             fetchSubjects();
         } catch (e) { alert("Failed to create"); }
+    };
+    
+    // NEW: Toggle Status
+    const toggleStatus = async (id: number, currentStatus: boolean) => {
+        try {
+            const token = getToken();
+            await fetch(`${getApiUrl()}/subjects/${id}/toggle?enable=${!currentStatus}`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            fetchSubjects();
+        } catch(e) { alert("Failed to update status"); }
     };
 
     if (isLoading) return <div>Loading...</div>;
@@ -107,24 +120,39 @@ export default function ClassesPage() {
                  )}
                  
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                     {subjects.map((sub, i) => (
-                        <div key={i} className="bg-gray-800 p-6 rounded-xl border border-gray-700 hover:border-gray-500 transition">
-                            <h2 className="text-xl font-bold">{sub.code}</h2>
+                     {subjects.map((sub, i) => {
+                        const isActive = sub.is_active !== 0 && sub.is_active !== false; // Handle SQLite 1/0 or boolean
+                        return (
+                        <div key={i} className={`p-6 rounded-xl border transition relative group overflow-hidden ${isActive ? 'bg-gray-800 border-gray-700 hover:border-gray-500' : 'bg-gray-900 border-gray-800 opacity-75'}`}>
+                            <div className="flex justify-between items-start mb-2">
+                                <h2 className="text-xl font-bold">{sub.code}</h2>
+                                <button 
+                                    onClick={() => toggleStatus(sub.id, isActive)}
+                                    className={`px-2 py-1 rounded text-xs font-bold border ${isActive ? 'border-green-500 text-green-500 hover:bg-green-500/10' : 'border-red-500 text-red-500 hover:bg-red-500/10'}`}
+                                >
+                                    {isActive ? "ACTIVE" : "DISABLED"}
+                                </button>
+                            </div>
+                            
                             <p className="text-gray-400 mb-4">{sub.name}</p>
+                            
                             <div className="flex justify-between items-center">
                                 <span className="text-xs bg-gray-700 px-2 py-1 rounded text-gray-400">
                                     ID: {sub.id}
                                 </span>
-                                <a 
-                                    href={`${getApiUrl().replace(':8000', ':3000')}/register?class_id=${sub.id}`} 
-                                    target="_blank"
-                                    className="text-blue-400 text-sm hover:underline"
-                                >
-                                    Registration Link ↗
-                                </a>
+                                {isActive && (
+                                    <a 
+                                        href={`${getApiUrl().replace(':8000', ':3000')}/register?class_code=${sub.code}`} 
+                                        target="_blank"
+                                        className="text-blue-400 text-sm hover:underline"
+                                    >
+                                        Registration Link ↗
+                                    </a>
+                                )}
                             </div>
+                            {!isActive && <div className="absolute inset-0 bg-black/20 pointer-events-none" />}
                         </div>
-                     ))}
+                     )})}
                      
                      {subjects.length === 0 && !isCreating && (
                          <p className="text-gray-500 col-span-full text-center py-10">

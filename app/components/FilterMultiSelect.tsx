@@ -16,7 +16,13 @@ interface FilterMultiSelectProps {
 
 export default function FilterMultiSelect({ label, options, selectedIds, onChange }: FilterMultiSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Filter options based on search
+    const filteredOptions = options.filter(opt => 
+        opt.label.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     // Close when clicking outside
     useEffect(() => {
@@ -65,10 +71,22 @@ export default function FilterMultiSelect({ label, options, selectedIds, onChang
             {/* DROPDOWN MENU */}
             {isOpen && (
                 <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-50">
-                    {options.length === 0 ? (
-                         <div className="p-3 text-xs text-gray-500 text-center">No options</div>
+                    {/* SEARCH INPUT */}
+                    <div className="p-2 border-b border-gray-700 sticky top-0 bg-gray-900 z-10">
+                        <input 
+                            type="text" 
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:border-blue-500 outline-none"
+                            placeholder={`Search ${label}...`}
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    </div>
+
+                    {filteredOptions.length === 0 ? (
+                         <div className="p-3 text-xs text-gray-500 text-center">No matches found</div>
                     ) : (
-                        options.map((opt) => {
+                        filteredOptions.map((opt) => {
                             const isSelected = selectedIds.includes(opt.id);
                             return (
                                 <div 
